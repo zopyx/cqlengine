@@ -10,6 +10,8 @@ class CQLLiteral(object):
     def __str__(self):
         return self.name
 
+    __repr__ = __str__
+
 
 def create_keyspace(name, strategy_class = 'SimpleStrategy', replication_factor=3):
     with connection_manager() as con:
