@@ -2,9 +2,32 @@ from collections import namedtuple
 import copy
 from hashlib import md5
 from time import time
+from cql.query import cql_quote
 
 from cqlengine.connection import connection_manager
 from cqlengine.exceptions import CQLEngineException
+
+class _Function(object):
+    def __init__(self, name):
+        self.name = name
+    def __call__(self, *args):
+        self.args = args
+        return self
+    def __str__(self):
+        return "{}({})".format(self.name, ','.join(cql_quote(a) for a in self.args))
+    __repr__ = __str__
+
+class _FunctionGenerator(object):
+    def __getattr__(self, name):
+        if name not in self.__dict__:
+            return _Function(name)
+        else:
+            try:
+                return self.__dict__[name]
+            except KeyError:
+                raise AttributeError(name)
+
+func = _FunctionGenerator()
 
 #CQL 3 reference:
 #http://www.datastax.com/docs/1.1/references/cql/index
@@ -164,7 +187,7 @@ class QuerySet(object):
 
     def __len__(self):
         return self.count()
-    
+
     def __del__(self):
         if self._con:
             self._con.close()
@@ -241,7 +264,7 @@ class QuerySet(object):
                 value_dict = dict(zip(names, values))
                 self._result_idx += 1
                 self._result_cache[self._result_idx] = self._construct_instance(value_dict)
-                
+
             #return the connection to the connection pool if we have all objects
             if self._result_cache and self._result_cache[-1] is not None:
                 self._con.close()
@@ -283,7 +306,7 @@ class QuerySet(object):
             else:
                 self._fill_result_cache_to_idx(s)
                 return self._result_cache[s]
-            
+
 
     def _construct_instance(self, values):
         #translate column names to model names
@@ -356,7 +379,7 @@ class QuerySet(object):
                     '{} objects found'.format(len(self._result_cache)))
         else:
             return self[0]
-        
+
 
 
     def order_by(self, colname):
@@ -401,7 +424,7 @@ class QuerySet(object):
             if self._where:
                 qs += ['WHERE {}'.format(self._where_clause())]
             qs = ' '.join(qs)
-    
+
             with connection_manager() as con:
                 cur = con.execute(qs, self._where_values())
                 return cur.fetchone()[0]
@@ -410,7 +433,7 @@ class QuerySet(object):
 
     def limit(self, v):
         """
-        Sets the limit on the number of results returned 
+        Sets the limit on the number of results returned
         CQL has a default limit of 10,000
         """
         if not (v is None or isinstance(v, (int, long))):
@@ -459,7 +482,7 @@ class QuerySet(object):
         """
         Creates / updates a row.
         This is a blind insert call.
-        All validation and cleaning needs to happen 
+        All validation and cleaning needs to happen
         prior to calling this.
         """
         assert type(instance) == self.model
@@ -503,7 +526,7 @@ class QuerySet(object):
 
             with connection_manager() as con:
                 con.execute(qs, pk_dict)
-            
+
 
     def create(self, **kwargs):
         return self.model(**kwargs).save()
