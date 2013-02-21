@@ -7,11 +7,13 @@ import Queue
 import random
 
 import cql
+import logging
 
 from cqlengine.exceptions import CQLEngineException
 
 from thrift.transport.TTransport import TTransportException
 
+LOG = logging.getLogger('cqlengine.cql')
 
 class CQLConnectionError(CQLEngineException): pass
 
@@ -36,7 +38,7 @@ def setup(hosts, username=None, password=None, max_connections=10):
     _username = username
     _password = password
     _max_connections = max_connections
-    
+
     for host in hosts:
         host = host.strip()
         host = host.split(':')
@@ -51,7 +53,7 @@ def setup(hosts, username=None, password=None, max_connections=10):
         raise CQLConnectionError("At least one host required")
 
     random.shuffle(_hosts)
-    
+
     con = ConnectionPool.get()
     ConnectionPool.put(con)
 
@@ -73,7 +75,7 @@ class ConnectionPool(object):
                 cls._queue.get().close()
         except:
             pass
-    
+
     @classmethod
     def get(cls):
         """
@@ -119,7 +121,7 @@ class ConnectionPool(object):
         global _hosts
         global _username
         global _password
-        
+
         if not _hosts:
             raise CQLConnectionError("At least one host required")
 
@@ -128,7 +130,7 @@ class ConnectionPool(object):
         new_conn = cql.connect(host.name, host.port, user=_username, password=_password)
         new_conn.set_cql_version('3.0.0')
         return new_conn
-        
+
 
 class connection_manager(object):
     """
@@ -140,7 +142,7 @@ class connection_manager(object):
         self.keyspace = None
         self.con = ConnectionPool.get()
         self.cur = None
-        
+
     def close(self):
         if self.cur: self.cur.close()
         ConnectionPool.put(self.con)
@@ -162,6 +164,7 @@ class connection_manager(object):
 
         for i in range(len(_hosts)):
             try:
+                LOG.debug('{}; {}'.format(query, repr(params)))
                 self.cur = self.con.cursor()
                 self.cur.execute(query, params)
                 return self.cur
