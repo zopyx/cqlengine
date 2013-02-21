@@ -11,7 +11,7 @@ class BaseModel(object):
     """
     The base model class, don't inherit from this, inherit from Model, defined below
     """
-    
+
     class DoesNotExist(QueryException): pass
     class MultipleObjectsReturned(QueryException): pass
 
@@ -19,7 +19,7 @@ class BaseModel(object):
     #however, you can also define them manually here
     table_name = None
 
-    #the keyspace for this model 
+    #the keyspace for this model
     keyspace = 'cqlengine'
     read_repair_chance = 0.1
 
@@ -49,11 +49,11 @@ class BaseModel(object):
         else:
             camelcase = re.compile(r'([a-z])([A-Z])')
             ccase = lambda s: camelcase.sub(lambda v: '{}_{}'.format(v.group(1), v.group(2).lower()), s)
-    
+
             module = cls.__module__.split('.')
             if module:
                 cf_name = ccase(module[-1]) + '_'
-    
+
             cf_name += ccase(cls.__name__)
             #trim to less than 48 characters or cassandra will complain
             cf_name = cf_name[-48:]
@@ -83,15 +83,15 @@ class BaseModel(object):
     @classmethod
     def create(cls, **kwargs):
         return cls.objects.create(**kwargs)
-    
+
     @classmethod
     def all(cls):
         return cls.objects.all()
-    
+
     @classmethod
     def filter(cls, **kwargs):
         return cls.objects.filter(**kwargs)
-    
+
     @classmethod
     def get(cls, **kwargs):
         return cls.objects.get(**kwargs)
@@ -159,7 +159,7 @@ class ModelMetaClass(type):
             if pk_name is None and v.primary_key:
                 pk_name = k
             _transform_column(k,v)
-        
+
         #setup primary key shortcut
         if pk_name != 'pk':
             attrs['pk'] = attrs[pk_name]
@@ -172,10 +172,10 @@ class ModelMetaClass(type):
             col_names.add(v.db_field_name)
 
         #check for indexes on models with multiple primary keys
-        if len([1 for k,v in column_definitions if v.primary_key]) > 1:
-            if len([1 for k,v in column_definitions if v.index]) > 0:
-                raise ModelDefinitionException(
-                    'Indexes on models with multiple primary keys is not supported')
+        #if len([1 for k,v in column_definitions if v.primary_key]) > 1:
+        #    if len([1 for k,v in column_definitions if v.index]) > 0:
+        #        raise ModelDefinitionException(
+        #            'Indexes on models with multiple primary keys is not supported')
 
         #create db_name -> model name map for loading
         db_map = {}
