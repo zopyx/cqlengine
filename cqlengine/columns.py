@@ -1,6 +1,7 @@
 #column field types
 from datetime import datetime
 import re
+import json
 from uuid import uuid1, uuid4
 
 from cqlengine.exceptions import ValidationError
@@ -163,6 +164,35 @@ class Text(Column):
                 raise ValidationError('{} is shorter than {} characters'.format(self.column_name, self.min_length))
         return value
 
+
+class JSON(Text):
+
+    def to_python(self, value):
+        """
+        Converts data from the database into python values
+        raises a ValidationError if the value can't be converted
+        """
+        try:
+            return json.loads(value)
+        except (TypeError, ValueError), e:
+            raise ValueError(e.message)
+
+    def to_database(self, value):
+        """
+        Converts python value into database value
+        """
+        if value is None and self.has_default:
+            value = self.get_default()
+        return json.dumps(value, separators=(',', ':'))
+
+    def validate(self, value):
+        try:
+            json.dumps(value)
+            return value
+        except (ValueError, TypeError), e:
+            raise ValidationError(e.message)
+
+
 class Integer(Column):
     db_type = 'int'
 
@@ -213,14 +243,14 @@ class UUID(Column):
         if not self.re_uuid.match(val):
             raise ValidationError("{} is not a valid uuid".format(value))
         return _UUID(val)
-    
+
 class TimeUUID(UUID):
     """
     UUID containing timestamp
     """
-    
+
     db_type = 'timeuuid'
-    
+
     def __init__(self, **kwargs):
         kwargs.setdefault('default', lambda: uuid1())
         super(TimeUUID, self).__init__(**kwargs)
