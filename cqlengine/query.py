@@ -152,6 +152,9 @@ class QuerySet(object):
         #ordering arguments
         self._order = None
 
+        # ALLOW FILTERING clause
+        self._allow_filtering = False
+
         #CQL has a default limit of 10000, it's defined here
         #because explicit is better than implicit
         self._limit = 10000
@@ -239,6 +242,9 @@ class QuerySet(object):
 
         if self._limit:
             qs += ['LIMIT {}'.format(self._limit)]
+
+        if self._allow_filtering:
+            qs += ['ALLOW FILTERING']
 
         return ' '.join(qs)
 
@@ -361,6 +367,11 @@ class QuerySet(object):
 
             clone._where.append(operator)
 
+        return clone
+
+    def allow_filtering(self):
+        clone = copy.deepcopy(self)
+        clone._allow_filtering = True
         return clone
 
     def get(self, **kwargs):
