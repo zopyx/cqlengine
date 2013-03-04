@@ -3,6 +3,7 @@ import re
 
 from cqlengine import columns
 from cqlengine.exceptions import ModelException
+from cqlengine.functions import BaseQueryFunction
 from cqlengine.query import QuerySet, QueryException
 
 class ModelDefinitionException(ModelException): pass
@@ -118,6 +119,7 @@ class ModelMetaClass(type):
         column_dict = OrderedDict()
         primary_keys = OrderedDict()
         pk_name = None
+        primary_key = None
 
         #get inherited properties
         inherited_columns = OrderedDict()
@@ -158,6 +160,8 @@ class ModelMetaClass(type):
         for k,v in column_definitions:
             if pk_name is None and v.primary_key:
                 pk_name = k
+                primary_key = v
+                v._partition_key = True
             _transform_column(k,v)
 
         #setup primary key shortcut
@@ -191,6 +195,7 @@ class ModelMetaClass(type):
         attrs['_defined_columns'] = defined_columns
         attrs['_db_map'] = db_map
         attrs['_pk_name'] = pk_name
+        attrs['_primary_key'] = primary_key
         attrs['_dynamic_columns'] = {}
 
         #create the class and add a QuerySet to it

@@ -60,6 +60,9 @@ class Column(object):
         self.default = default
         self.required = required
 
+        #only the model meta class should touch this
+        self._partition_key = False
+
         #the column name in the model definition
         self.column_name = None
 
@@ -217,13 +220,14 @@ class DateTime(Column):
     def to_python(self, value):
         if isinstance(value, datetime):
             return value
-        return datetime.fromtimestamp(value)
+        return datetime.utcfromtimestamp(value)
 
     def to_database(self, value):
         value = super(DateTime, self).to_database(value)
         if not isinstance(value, datetime):
             raise ValidationError("'{}' is not a datetime object".format(value))
-        return value.strftime('%Y-%m-%d %H:%M:%S')
+        epoch = datetime(1970, 1, 1)
+        return long((value - epoch).total_seconds() * 1000)
 
 class UUID(Column):
     """

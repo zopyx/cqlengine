@@ -2,32 +2,10 @@ from collections import namedtuple
 import copy
 from hashlib import md5
 from time import time
-from cql.query import cql_quote
 
 from cqlengine.connection import connection_manager
 from cqlengine.exceptions import CQLEngineException
-
-class _Function(object):
-    def __init__(self, name):
-        self.name = name
-    def __call__(self, *args):
-        self.args = args
-        return self
-    def __str__(self):
-        return "{}({})".format(self.name, ','.join(cql_quote(a) for a in self.args))
-    __repr__ = __str__
-
-class _FunctionGenerator(object):
-    def __getattr__(self, name):
-        if name not in self.__dict__:
-            return _Function(name)
-        else:
-            try:
-                return self.__dict__[name]
-            except KeyError:
-                raise AttributeError(name)
-
-func = _FunctionGenerator()
+from cqlengine.functions import BaseQueryFunction
 
 #CQL 3 reference:
 #http://www.datastax.com/docs/1.1/references/cql/index
@@ -62,7 +40,10 @@ class QueryOperator(object):
         Returns this operator's portion of the WHERE clause
         :param valname: the dict key that this operator's compare value will be found in
         """
-        return '{} {} :{}'.format(self.column.db_field_name, self.cql_symbol, self.identifier)
+        if isinstance(self.value, BaseQueryFunction):
+            return '"{}" {} {}'.format(self.column.db_field_name, self.cql_symbol, self.value.to_cql(self.identifier))
+        else:
+            return '"{}" {} :{}'.format(self.column.db_field_name, self.cql_symbol, self.identifier)
 
     def validate_operator(self):
         """
@@ -97,7 +78,10 @@ class QueryOperator(object):
         this should return the dict: {'colval':<self.value>}
         SELECT * FROM column_family WHERE colname=:colval
         """
-        return {self.identifier: self.value}
+        if isinstance(self.value, BaseQueryFunction):
+            return {self.identifier: self.column.to_database(self.value.get_value())}
+        else:
+            return {self.identifier: self.column.to_database(self.value)}
 
     @classmethod
     def get_operator(cls, symbol):
@@ -152,7 +136,6 @@ class QuerySet(object):
         #ordering arguments
         self._order = None
 
-        # ALLOW FILTERING clause
         self._allow_filtering = False
 
         #CQL has a default limit of 10000, it's defined here
@@ -190,7 +173,7 @@ class QuerySet(object):
 
     def __len__(self):
         return self.count()
-
+    
     def __del__(self):
         if self._con:
             self._con.close()
@@ -206,6 +189,14 @@ class QuerySet(object):
         equal_ops = [w for w in self._where if isinstance(w, EqualsOperator)]
         if not any([w.column.primary_key or w.column.index for w in equal_ops]):
             raise QueryException('Where clauses require either a "=" or "IN" comparison with either a primary key or indexed field')
+
+        if not self._allow_filtering:
+            #if the query is not on an indexed field
+            if not any([w.column.index for w in equal_ops]):
+                if not any([w.column._partition_key for w in equal_ops]):
+                    raise QueryException('Filtering on a clustering key without a partition key is not allowed unless allow_filtering() is called on the querset')
+
+
         #TODO: abuse this to see if we can get cql to raise an exception
 
     def _where_clause(self):
@@ -231,7 +222,7 @@ class QuerySet(object):
             fields = [f for f in fields if f in self._only_fields]
         db_fields = [self.model._columns[f].db_field_name for f in fields]
 
-        qs = ['SELECT {}'.format(', '.join(db_fields))]
+        qs = ['SELECT {}'.format(', '.join(['"{}"'.format(f) for f in db_fields]))]
         qs += ['FROM {}'.format(self.column_family_name)]
 
         if self._where:
@@ -270,7 +261,7 @@ class QuerySet(object):
                 value_dict = dict(zip(names, values))
                 self._result_idx += 1
                 self._result_cache[self._result_idx] = self._construct_instance(value_dict)
-
+                
             #return the connection to the connection pool if we have all objects
             if self._result_cache and self._result_cache[-1] is not None:
                 self._con.close()
@@ -312,7 +303,7 @@ class QuerySet(object):
             else:
                 self._fill_result_cache_to_idx(s)
                 return self._result_cache[s]
-
+            
 
     def _construct_instance(self, values):
         #translate column names to model names
@@ -369,11 +360,6 @@ class QuerySet(object):
 
         return clone
 
-    def allow_filtering(self):
-        clone = copy.deepcopy(self)
-        clone._allow_filtering = True
-        return clone
-
     def get(self, **kwargs):
         """
         Returns a single instance matching this query, optionally with additional filter kwargs.
@@ -390,7 +376,7 @@ class QuerySet(object):
                     '{} objects found'.format(len(self._result_cache)))
         else:
             return self[0]
-
+        
 
 
     def order_by(self, colname):
@@ -423,7 +409,7 @@ class QuerySet(object):
                 "Can't order by the first primary key, clustering (secondary) keys only")
 
         clone = copy.deepcopy(self)
-        clone._order = '{} {}'.format(column.db_field_name, order_type)
+        clone._order = '"{}" {}'.format(column.db_field_name, order_type)
         return clone
 
     def count(self):
@@ -434,8 +420,11 @@ class QuerySet(object):
             qs += ['FROM {}'.format(self.column_family_name)]
             if self._where:
                 qs += ['WHERE {}'.format(self._where_clause())]
-            qs = ' '.join(qs)
+            if self._allow_filtering:
+                qs += ['ALLOW FILTERING']
 
+            qs = ' '.join(qs)
+    
             with connection_manager() as con:
                 cur = con.execute(qs, self._where_values())
                 return cur.fetchone()[0]
@@ -444,7 +433,7 @@ class QuerySet(object):
 
     def limit(self, v):
         """
-        Sets the limit on the number of results returned
+        Sets the limit on the number of results returned 
         CQL has a default limit of 10,000
         """
         if not (v is None or isinstance(v, (int, long))):
@@ -457,6 +446,15 @@ class QuerySet(object):
 
         clone = copy.deepcopy(self)
         clone._limit = v
+        return clone
+
+    def allow_filtering(self):
+        """
+        Enables the unwise practive of querying on a clustering
+        key without also defining a partition key
+        """
+        clone = copy.deepcopy(self)
+        clone._allow_filtering = True
         return clone
 
     def _only_or_defer(self, action, fields):
@@ -493,7 +491,7 @@ class QuerySet(object):
         """
         Creates / updates a row.
         This is a blind insert call.
-        All validation and cleaning needs to happen
+        All validation and cleaning needs to happen 
         prior to calling this.
         """
         assert type(instance) == self.model
@@ -512,7 +510,7 @@ class QuerySet(object):
         field_names = zip(*value_pairs)[0]
         field_values = dict(value_pairs)
         qs = ["INSERT INTO {}".format(self.column_family_name)]
-        qs += ["({})".format(', '.join(field_names))]
+        qs += ["({})".format(', '.join(['"{}"'.format(f) for f in field_names]))]
         qs += ['VALUES']
         qs += ["({})".format(', '.join([':'+f for f in field_names]))]
         qs = ' '.join(qs)
@@ -526,7 +524,7 @@ class QuerySet(object):
             del_fields = [self.model._columns[f] for f in deleted]
             del_fields = [f.db_field_name for f in del_fields if not f.primary_key]
             pks = self.model._primary_keys
-            qs = ['DELETE {}'.format(', '.join(del_fields))]
+            qs = ['DELETE {}'.format(', '.join(['"{}"'.format(f) for f in del_fields]))]
             qs += ['FROM {}'.format(self.column_family_name)]
             qs += ['WHERE']
             eq = lambda col: '{0} = :{0}'.format(v.column.db_field_name)
@@ -537,7 +535,7 @@ class QuerySet(object):
 
             with connection_manager() as con:
                 con.execute(qs, pk_dict)
-
+            
 
     def create(self, **kwargs):
         return self.model(**kwargs).save()
