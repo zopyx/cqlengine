@@ -178,10 +178,16 @@ class JSON(Text):
         Converts data from the database into python values
         raises a ValidationError if the value can't be converted
         """
-        try:
-            return json.loads(value)
-        except (TypeError, ValueError), e:
-            raise ValueError(e.message)
+        if value is None:
+            return None
+
+        if isinstance(value, basestring):
+            try:
+                return json.loads(value)
+            except (TypeError, ValueError), e:
+                raise ValueError(e.message)
+        else:
+            return value
 
     def to_database(self, value):
         """
