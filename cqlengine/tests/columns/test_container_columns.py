@@ -45,6 +45,32 @@ class TestSetColumn(BaseCassEngTestCase):
         with self.assertRaises(ValidationError):
             TestSetModel.create(int_set={'string', True}, text_set={1, 3.0})
 
+    def test_partial_updates(self):
+        """ Tests that partial udpates work as expected """
+        m1 = TestSetModel.create(int_set={1,2,3,4})
+
+        m1.int_set.add(5)
+        m1.int_set.remove(1)
+        assert m1.int_set == {2,3,4,5}
+
+        m1.save()
+
+        m2 =  TestSetModel.get(partition=m1.partition)
+        assert m2.int_set == {2,3,4,5}
+
+    def test_partial_update_creation(self):
+        """
+        Tests that proper update statements are created for a partial set update
+        :return:
+        """
+        ctx = {}
+        col = columns.Set(columns.Integer, db_field="TEST")
+        statements = col.get_update_statement({1,2,3,4}, {2,3,4,5}, ctx)
+
+        assert len([v for v in ctx.values() if {1} == v.value]) == 1
+        assert len([v for v in ctx.values() if {5} == v.value]) == 1
+        assert len([s for s in statements if '"TEST" = "TEST" -' in s]) == 1
+        assert len([s for s in statements if '"TEST" = "TEST" +' in s]) == 1
 
 class TestListModel(Model):
     partition   = columns.UUID(primary_key=True, default=uuid4)
@@ -88,6 +114,34 @@ class TestListColumn(BaseCassEngTestCase):
         with self.assertRaises(ValidationError):
             TestListModel.create(int_list=['string', True], text_list=[1, 3.0])
 
+    def test_partial_updates(self):
+        """ Tests that partial udpates work as expected """
+        final = range(10)
+        initial = final[3:7]
+        m1 = TestListModel.create(int_list=initial)
+
+        m1.int_list = final
+        m1.save()
+
+        m2 =  TestListModel.get(partition=m1.partition)
+        assert list(m2.int_list) == final
+
+    def test_partial_update_creation(self):
+        """
+        Tests that proper update statements are created for a partial list update
+        :return:
+        """
+        final = range(10)
+        initial = final[3:7]
+
+        ctx = {}
+        col = columns.List(columns.Integer, db_field="TEST")
+        statements = col.get_update_statement(final, initial, ctx)
+
+        assert len([v for v in ctx.values() if [2,1,0] == v.value]) == 1
+        assert len([v for v in ctx.values() if [7,8,9] == v.value]) == 1
+        assert len([s for s in statements if '"TEST" = "TEST" +' in s]) == 1
+        assert len([s for s in statements if '+ "TEST"' in s]) == 1
 
 class TestMapModel(Model):
     partition   = columns.UUID(primary_key=True, default=uuid4)
@@ -135,3 +189,40 @@ class TestMapColumn(BaseCassEngTestCase):
         """
         with self.assertRaises(ValidationError):
             TestMapModel.create(int_map={'key':2,uuid4():'val'}, text_map={2:5})
+
+    def test_partial_updates(self):
+        """ Tests that partial udpates work as expected """
+        now = datetime.now()
+        #derez it a bit
+        now = datetime(*now.timetuple()[:-3])
+        early = now - timedelta(minutes=30)
+        earlier = early - timedelta(minutes=30)
+        later = now + timedelta(minutes=30)
+
+        initial = {'now':now, 'early':earlier}
+        final =  {'later':later, 'early':early}
+
+        m1 = TestMapModel.create(text_map=initial)
+
+        m1.text_map = final
+        m1.save()
+
+        m2 =  TestMapModel.get(partition=m1.partition)
+        assert m2.text_map == final
+
+#    def test_partial_update_creation(self):
+#        """
+#        Tests that proper update statements are created for a partial list update
+#        :return:
+#        """
+#        final = range(10)
+#        initial = final[3:7]
+#
+#        ctx = {}
+#        col = columns.List(columns.Integer, db_field="TEST")
+#        statements = col.get_update_statement(final, initial, ctx)
+#
+#        assert len([v for v in ctx.values() if [0,1,2] == v.value]) == 1
+#        assert len([v for v in ctx.values() if [7,8,9] == v.value]) == 1
+#        assert len([s for s in statements if '"TEST" = "TEST" +' in s]) == 1
+#        assert len([s for s in statements if '+ "TEST"' in s]) == 1

@@ -4,9 +4,27 @@ import re
 from cqlengine import columns
 from cqlengine.exceptions import ModelException
 from cqlengine.functions import BaseQueryFunction
-from cqlengine.query import QuerySet, QueryException
+from cqlengine.query import QuerySet, QueryException, DMLQuery
 
 class ModelDefinitionException(ModelException): pass
+
+DEFAULT_KEYSPACE = 'cqlengine'
+
+class hybrid_classmethod(object):
+    """
+    Allows a method to behave as both a class method and
+    normal instance method depending on how it's called
+    """
+
+    def __init__(self, clsmethod, instmethod):
+        self.clsmethod = clsmethod
+        self.instmethod = instmethod
+
+    def __get__(self, instance, owner):
+        if instance is None:
+            return self.clsmethod.__get__(owner, owner)
+        else:
+            return self.instmethod.__get__(instance, owner)
 
 class BaseModel(object):
     """
@@ -20,8 +38,8 @@ class BaseModel(object):
     #however, you can also define them manually here
     table_name = None
 
-    #the keyspace for this model
-    keyspace = 'cqlengine'
+    #the keyspace for this model 
+    keyspace = None
     read_repair_chance = 0.1
 
     def __init__(self, **values):
@@ -31,6 +49,27 @@ class BaseModel(object):
             if value is not None: value = column.to_python(value)
             value_mngr = column.value_manager(self, column, value)
             self._values[name] = value_mngr
+
+        # a flag set by the deserializer to indicate
+        # that update should be used when persisting changes
+        self._is_persisted = False
+        self._batch = None
+
+    def _can_update(self):
+        """
+        Called by the save function to check if this should be
+        persisted with update or insert
+
+        :return:
+        """
+        if not self._is_persisted: return False
+        pks = self._primary_keys.keys()
+        return all([not self._values[k].changed for k in self._primary_keys])
+
+    @classmethod
+    def _get_keyspace(cls):
+        """ Returns the manual keyspace, if set, otherwise the default keyspace """
+        return cls.keyspace or DEFAULT_KEYSPACE
 
     def __eq__(self, other):
         return self.as_dict() == other.as_dict()
@@ -61,7 +100,7 @@ class BaseModel(object):
             cf_name = cf_name.lower()
             cf_name = re.sub(r'^_+', '', cf_name)
         if not include_keyspace: return cf_name
-        return '{}.{}'.format(cls.keyspace, cf_name)
+        return '{}.{}'.format(cls._get_keyspace(), cf_name)
 
     @property
     def pk(self):
@@ -100,13 +139,29 @@ class BaseModel(object):
     def save(self):
         is_new = self.pk is None
         self.validate()
-        self.objects.save(self)
-        #delete any fields that have been deleted / set to none
+        DMLQuery(self.__class__, self, batch=self._batch).save()
+
+        #reset the value managers
+        for v in self._values.values():
+            v.reset_previous_value()
+        self._is_persisted = True
+
         return self
 
     def delete(self):
         """ Deletes this instance """
-        self.objects.delete_instance(self)
+        DMLQuery(self.__class__, self, batch=self._batch).delete()
+
+    @classmethod
+    def _class_batch(cls, batch):
+        return cls.objects.batch(batch)
+
+    def _inst_batch(self, batch):
+        self._batch = batch
+        return self
+
+    batch = hybrid_classmethod(_class_batch, _inst_batch)
+
 
 
 class ModelMetaClass(type):
