@@ -168,7 +168,7 @@ class connection_manager(object):
 
         for i in range(len(_hosts)):
             try:
-                LOG.debug('{}; {}'.format(query, repr(params)))
+                LOG.debug('{} {}'.format(query, repr(params)))
                 self.cur = self.con.cursor()
                 self.cur.execute(query, params)
                 return self.cur
