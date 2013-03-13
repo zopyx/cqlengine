@@ -126,22 +126,20 @@ class LessThanOrEqualOperator(QueryOperator):
     symbol = "LTE"
     cql_symbol = '<='
 
-class Consistency(object):
-    ANY = 'ANY'
-    ONE = 'ONE'
-    QUORUM = 'QUORUM'
-    LOCAL_QUORUM = 'LOCAL_QUORUM'
-    EACH_QUORUM = 'EACH_QUORUM'
-    ALL = 'ALL'
+class BatchType(object):
+    Unlogged    = 'UNLOGGED'
+    Counter     = 'COUNTER'
 
 class BatchQuery(object):
     """
     Handles the batching of queries
+
+    http://www.datastax.com/docs/1.2/cql_cli/cql/BATCH
     """
 
-    def __init__(self, consistency=None, timestamp=None):
+    def __init__(self, batch_type=None, timestamp=None):
         self.queries = []
-        self.consistency = consistency
+        self.batch_type = batch_type
         if timestamp is not None and not isinstance(timestamp, datetime):
             raise CQLEngineException('timestamp object must be an instance of datetime')
         self.timestamp = timestamp
@@ -150,13 +148,11 @@ class BatchQuery(object):
         self.queries.append((query, params))
 
     def execute(self):
-        opener = 'BEGIN BATCH'
-        if self.consistency:
-            opener += ' USING CONSISTENCY {}'.format(self.consistency)
+        opener = 'BEGIN ' + (self.batch_type + ' ' if self.batch_type else '') + ' BATCH'
         if self.timestamp:
             epoch = datetime(1970, 1, 1)
             ts = long((self.timestamp - epoch).total_seconds() * 1000)
-            opener += ' TIMESTAMP {}'.format(ts)
+            opener += ' USING TIMESTAMP {}'.format(ts)
 
         query_list = [opener]
         parameters = {}
@@ -228,6 +224,10 @@ class QuerySet(object):
             if k in ['_con', '_cur', '_result_cache', '_result_idx']:
                 clone.__dict__[k] = None
             elif k == '_batch':
+                # we need to keep the same batch instance across
+                # all queryset clones, otherwise the batched queries
+                # fly off into other batch instances which are never
+                # executed, thx @dokai
                 clone.__dict__[k] = self._batch
             else:
                 clone.__dict__[k] = copy.deepcopy(v, memo)
