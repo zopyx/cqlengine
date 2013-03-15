@@ -248,7 +248,9 @@ class DateTime(Column):
     def to_database(self, value):
         value = super(DateTime, self).to_database(value)
         if not isinstance(value, datetime):
-            raise ValidationError("'{}' is not a datetime object".format(value))
+            raise ValidationError("'{}' is not a datetime object".format(value))    
+        elif isinstance(value, date):
+            return datetime(*(value.timetuple()[:6]))
         epoch = datetime(1970, 1, 1)
         return long((value - epoch).total_seconds() * 1000)
 
